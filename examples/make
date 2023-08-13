@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+
+from makefilepy import *
+
+phony([
+    'all', 'clean', 'linux-x64', 'windows-x64', 'macos-x64', 'macos-aarch64',
+])
+
+LINK_ARGS: list[str] = []
+COMP_ARGS: list[str] = []
+COMP_ARGS.extend(
+    r'-D_GNU_SOURCE -DCONFIG_BIGNUM -DCONFIG_VERSION="2021-03-27"'.split()
+)
+COMP_ARGS.extend(['-O2'])
+DLEXT = ".dll"
+CC: list[str] = ["zig",  "c++"]
+ROOT = Path(__file__).parent.relative_to(os.getcwd())
+
+sources = [
+    'ffi.c',
+    'quickjs/cutils.c',
+    'quickjs/libbf.c',
+    'quickjs/libregexp.c',
+    'quickjs/libunicode.c',
+    'quickjs/quickjs.c',
+    'quickjs/quickjs-libc.c'
+]
+
+@recipe()
+def clean():
+    """clean the build directory"""
+    shutil.rmtree(ROOT / "bin")
+
+@recipe()
+def distclean():
+    """clean the build directory and all generated files"""
+    clean()
+    shutil.rmtree(ROOT / "dist")
+
+def build(target: str):
+    target_dir = ROOT.joinpath('bin', target)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    shell([
+        *CC,
+        '-std=gnu99',
+        '-shared',
+        '-fPIC',
+        '-o',
+        (target_dir.joinpath(f'libquickjs.{DLEXT}')).as_posix(),
+        *sources,
+    *COMP_ARGS,
+        *LINK_ARGS,
+        '-I' + (ROOT / 'quickjs').as_posix(),
+        '-I' + (ROOT).as_posix()
+    ])
+
+@recipe('quickjs')
+def linux_x64():
+    """build libquickjs.so for linux x64"""
+    global DLEXT, CC
+    DLEXT = "so"
+    COMP_ARGS.extend(['-lm', '-ldl', '-lpthread', '-Wno-int-conversion'])
+    CC = ["zig", 'cc']
+    COMP_ARGS.extend(['-target', 'x86_64-linux-gnu.2.17'])
+
+    build('linux-x64')
+
+@recipe('quickjs')
+def windows_x64():
+    """build libquickjs.so for Linux x64"""
+    global DLEXT, CC
+    DLEXT = "dll"
+    COMP_ARGS.extend(['-ldl'])
+    LINK_ARGS.extend(['-static', "-s"])
+    CC = ["gcc"]
+
+    build('windows-x64')
+
+@recipe('quickjs')
+def macos_x64():
+    """build libquickjs.dylib for macos x64"""
+    global DLEXT, CC
+    DLEXT = "dylib"
+    CC = ['zig', 'cc']
+    COMP_ARGS.extend([
+        '-Werror=incompatible-pointer-types',
+        '-Wno-int-conversion'
+    ])
+    COMP_ARGS.extend(['-ldl', '-target', 'x86_64-macos-none'])
+
+    build('macos-x64')
+
+@recipe('quickjs')
+def macos_aarch64():
+    """build libquickjs.dylib for macos aarch64"""
+    global DLEXT, CC
+    DLEXT = "dylib"
+    CC = ['zig', 'cc']
+    COMP_ARGS.extend([
+        '-Werror=incompatible-pointer-types',
+        '-Wno-int-conversion'
+    ])
+    COMP_ARGS.extend(['-ldl', '-target', 'aarch64-macos-none'])
+
+    build('macos-aarch64')
+
+@recipe()
+def quickjs():
+    shell('git clone git@github.com:ekibun/quickjs.git quickjs')
+
+@recipe('windows-x64', 'linux-x64', 'macos-x64', 'macos-aarch64')
+def dist():
+    """make distributions"""
+    pass
+
+make()

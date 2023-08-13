@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "makefile-py"
+version = "0.1.0"
+description = ""
+authors = ["thautwarm <twshere@outlook.com>"]
+readme = "README.md"
+packages = [{include = "makefilepy"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+wisepy2 = "^1.4.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
