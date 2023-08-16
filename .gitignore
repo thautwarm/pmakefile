@@ -1,4 +1,4 @@
 __pycache__/
-/examples/bin
-/examples/quickjs
+/example/bin
+/example/quickjs
 dist/
