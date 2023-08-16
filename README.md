@@ -9,7 +9,7 @@ it's been part of Unix world for over 40 years. However, it's not a perfect tool
 
 ## Usage
 
-See `example/` directory, where we write a single makefile in Python using `makefile.py` and `zig cc` to cross-compile the QuickJS project for Windows, Linux, and macOS (x86_64 and aarch64), which is a huge task and so far not achieved by any other known makefile written for QuickJS. The makefile gives us excellent portability, static type checking, and simplicity, while depending on only a standard Python distribution.
+See the `example/` directory where we write a single `make` in Python using `makefile.py` and `zig cc` to cross-compile the QuickJS project for Windows, Linux, and macOS (x86_64 and aarch64), which is a huge task and so far not achieved by any other known makefile written for QuickJS. With `makefile.py`, writing `make` promises us excellent portability, static type checking, and simplicity, while depending on only a standard Python distribution.
 
 `makefile.py` defines a Python module `makefilepy` which exports some useful functions. See [builtin functions](#useful-helper-functions)
 
@@ -34,6 +34,12 @@ def my_recipe():
 
 
 make()
+```
+
+Then you can use it in your favorite shell:
+
+```shell
+./make help
 ```
 
 ## Useful Helper Functions
