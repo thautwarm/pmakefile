@@ -1,0 +1,3 @@
+# do not count .c/.h files as source files:
+*.c linguist-documentation
+*.h linguist-documentation
