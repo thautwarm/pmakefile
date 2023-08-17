@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "makefile-py"
+name = "pmakefile"
 version = "0.1.0"
 description = ""
 authors = ["thautwarm <twshere@outlook.com>"]
 readme = "README.md"
-packages = [{include = "makefilepy"}]
+packages = [{include = "pmakefile"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
