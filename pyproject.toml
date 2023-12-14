@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "pmakefile"
-version = "0.4.3"
+version = "0.4.4"
 description = ""
 authors = ["thautwarm <twshere@outlook.com>"]
 readme = "README.md"
 packages = [{include = "pmakefile"}]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.7"
 wisepy2 = "^1.4.1"
 
 
