@@ -16,8 +16,6 @@ The `pmakefile` Python module exports some useful functions, see [builtin functi
 The pmakefile structure can be given as follows:
 
 ```python
-#!/usr/bin/env python
-
 from pmakefile import *
 
 phony([
@@ -31,15 +29,14 @@ def my_recipe():
     """documentation for my_recipe"""
 
     # some python statements
-
-
-make()
 ```
 
 Then you can use it in your favorite shell:
 
 ```shell
-./make help
+pmk help
+# pmk all
+# pmk clean
 ```
 
 ## Useful Helper Functions
@@ -48,6 +45,9 @@ Then you can use it in your favorite shell:
 - `get_os() -> 'windows' | 'linux' | 'macos'`
 - `log(msg: str, level: 'ok' | 'error' | 'info' | 'debug' | 'warn' | 'normal' = 'normal')`
 - `shell(command: str | list[str], *, env: dict | None = None, noprint: bool = False)`
+- `get_deps()`: get direct dependencies of current target
+- `with proft(title: str): ...`: profile the execution time of the code block and report with the given `title` (when the environment variable `PMAKEFILE_PROF` is set)
+- `get_dlext() -> str`: get platform-specific dynamic library file extension
 
 ## License
 

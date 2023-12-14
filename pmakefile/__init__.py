@@ -26,7 +26,7 @@ __all__ = [
     "make",
     "Path",
     "shutil",
-    "bench",
+    "proft",
 ]
 
 _os_map: dict[str, Literal["windows", "linux", "macos"]] = {
@@ -39,9 +39,9 @@ _os_map: dict[str, Literal["windows", "linux", "macos"]] = {
 }
 
 
-if os.environ.get("PMAKEFILE_BENCH"):
+if os.environ.get("PMAKEFILE_PROF"):
     @contextmanager
-    def bench(title: str): # type: ignore
+    def proft(title: str): # type: ignore
         t0 = time.time()
         try:
             yield
@@ -49,7 +49,7 @@ if os.environ.get("PMAKEFILE_BENCH"):
             print(f'[{title}]: {time.time() - t0}s')
 
 else:
-    class bench:
+    class proft:
         def __init__(self, title):
             pass
 
@@ -135,19 +135,31 @@ class Makefile:
 _deps: list[str] | None = None
 
 
-def text_to_b64(s: str):
+_cache_text_to_b64: dict[str, str] = {}
+def text_to_b64(s: str, cache: bool = False):
+    if cache:
+        v = _cache_text_to_b64.get(s)
+        if v is None:
+            _cache_text_to_b64[s] = v = text_to_b64(s, False)
+        return v
     return base64.b64encode(s.encode("utf-8")).decode("utf-8")
 
 
 def b64_to_text(s: str):
     return base64.b64decode(s.encode("utf-8")).decode("utf-8")
 
-
 def get_deps():
     if _deps is None:
         raise RuntimeError("can only use 'get_deps()' inside recipes")
     return list(_deps)
 
+_encodes: dict[str, bytes] = {}
+
+def _get_encodes(k: str):
+    v = _encodes.get(k)
+    if v is None:
+        _encodes[k] = v = k.encode('utf-8')
+    return v
 
 class MakefileRunner:
     makefile: Makefile
@@ -181,7 +193,7 @@ class MakefileRunner:
     def _get_cache_hash(self, recipe_self: str) -> bytes:
         recipe_cache_dir = self.cache_dir.joinpath("recipes")
         recipe_cache_dir.mkdir(exist_ok=True, parents=True)
-        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self))
+        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache = True))
         if cache_file.exists():
             if cache_file.is_dir():
                 raise FileExistsError(
@@ -193,24 +205,30 @@ class MakefileRunner:
     def _save_cache_hash(self, recipe_self: str, h: bytes):
         recipe_cache_dir = self.cache_dir.joinpath("recipes")
         recipe_cache_dir.mkdir(exist_ok=True, parents=True)
-        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self))
+        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache = True))
         cache_file.write_text(base64.b64encode(h).decode())
 
     def _compute_hash(self, prereqs: list[str], recipe_self: str, is_phony: bool):
         prereqs = sorted(prereqs)
         if not is_phony:
-            hgen = hashlib.md5(b"p")
+            hgen = hashlib.md5(b"fs@")
             p = Path(recipe_self)
             if p.exists():
-                hgen.update(b'@17@')
+                hgen.update(b'exist@')
+                hgen.update(_get_encodes(recipe_self))
                 if p.is_file():
+                    hgen.update(b'~file=')
                     hgen.update(p.read_bytes())
             else:
-                hgen.update(b'@0')
+                hgen.update(b'unknown@')
+                hgen.update(_get_encodes(recipe_self))
         else:
-            hgen = hashlib.md5(b"f")
+            hgen = hashlib.md5(b"phony@")
+            hgen.update(_get_encodes(recipe_self))
 
         for each in prereqs:
+            hgen.update(b'+')
+            hgen.update(_get_encodes(each))
             hgen.update(self._get_cache_hash(each))
 
         return hgen.digest()
@@ -221,7 +239,7 @@ class MakefileRunner:
         if recipe_name in self.built_recipes:
             return
 
-        with bench(f"[PMakefile] run {recipe_name}"):
+        with proft(f"[PMakefile] run {recipe_name}"):
 
             recipe = self.makefile.commands.get(recipe_name)
             if recipe:
@@ -323,7 +341,6 @@ def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always
 
 _hasRun = False
 
-
 def make(*recipes):
     global _hasRun
     if _hasRun:
@@ -416,7 +433,7 @@ def main():
                     # print reset
                     print("\033[0m", end="")
                     continue
-            with bench("[PMakefile] run main procedure"):
+            with proft("[PMakefile] run main procedure"):
                 import_from_source_file(cwd.joinpath(alt), "__make_main__")
                 if not _hasRun:
                     make()
