@@ -377,11 +377,15 @@ class MakefileRunner:
             if recipe:
                 if recipe.rebuild == "always":
                     pass
-                elif recipe.rebuild in ("auto", "autoWithDir") and new_hash == old_hash:
+                elif (
+                    recipe.rebuild in ("auto", "autoWithDir")
+                    and new_hash == old_hash
+                    and (is_phony or self.cwd.joinpath(recipe_name).exists())
+                ):
                     return
                 elif (
                     recipe.rebuild == "no"
-                    and recipe_name not in self.phony
+                    and not is_phony
                     and self.cwd.joinpath(recipe_name).exists()
                 ):
                     self._save_cache_hash(recipe_name, new_hash)

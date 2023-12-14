@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pmakefile"
-version = "0.4.2"
+version = "0.4.3"
 description = ""
 authors = ["thautwarm <twshere@outlook.com>"]
 readme = "README.md"
