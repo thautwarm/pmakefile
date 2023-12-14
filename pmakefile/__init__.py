@@ -123,7 +123,7 @@ def shell(
 class Recipe:
     dependencies: list[str]
     command: Callable[[], None]
-    rebuild: Literal["auto", "no", "always"] = "auto"
+    rebuild: Literal["auto", "no", "always", "autoWithDir"] = "auto"
 
 
 @dataclass
@@ -274,46 +274,50 @@ class MakefileRunner:
 
             old_hash = self._get_cache_hash(recipe_name)
 
-            try:
-                if recipe:
-                    if recipe.rebuild == "always":
-                        pass
-                    elif recipe.rebuild == "auto" and new_hash == old_hash:
-                        return
-                    elif (
-                        recipe.rebuild == "no"
-                        and recipe_name not in self.phony
-                        and self.cwd.joinpath(recipe_name).exists()
-                    ):
-                        return
-                else:
-                    if new_hash == old_hash:
-                        return
+            if recipe:
+                if recipe.rebuild == "always":
+                    pass
+                elif recipe.rebuild in ("auto", "autoWithDir") and new_hash == old_hash:
+                    return
+                elif (
+                    recipe.rebuild == "no"
+                    and recipe_name not in self.phony
+                    and self.cwd.joinpath(recipe_name).exists()
+                ):
+                    self._save_cache_hash(recipe_name, new_hash)
+                    return
+            else:
+                if new_hash == old_hash:
+                    return
 
-                self._run_impl(recipe_name)
-                new_hash = compute_hash()
-            finally:
-                self._save_cache_hash(recipe_name, new_hash)
+            self._run_impl(recipe_name)
+            new_hash = compute_hash()
+            self._save_cache_hash(recipe_name, new_hash)
 
     def _run_impl(self, recipe_name: str):
-        if recipe_name not in self.phony:
-            p = Path(recipe_name)
-            if p.exists():
-                if recipe_name in self.makefile.commands:
+        try:
+            if recipe_name not in self.phony:
+                p = Path(recipe_name)
+                recipe = self.makefile.commands.get(recipe_name)
+                if p.exists() and recipe:
                     if p.is_dir():
-                        shutil.rmtree(p, ignore_errors=True)
-                        try:
-                            p.rmdir()
-                        except:
+                        if recipe.rebuild in ('always', 'autoWithDir'):
+                            shutil.rmtree(p, ignore_errors=True)
+                            try:
+                                p.rmdir()
+                            except:
+                                pass
+                        elif recipe.rebuild == 'auto':
+                            # will run the recipe, but directories are reused.
                             pass
+                        else:
+                            # else is in possible
+                            assert False, f"unknown rebuild mode: {recipe.rebuild}"
                     else:
                         p.unlink(missing_ok=True)
-            self.built_recipes.add(recipe_name)
             self._run_simple(recipe_name)
-            return
-
-        self.built_recipes.add(recipe_name)
-        self._run_simple(recipe_name)
+        finally:
+            self.built_recipes.add(recipe_name)
 
     def _run_simple(self, recipe_name: str):
         recipe = self.makefile.commands.get(recipe_name)
@@ -329,7 +333,28 @@ def phony(names: list[str]):
     PHONY.update(names)
 
 
-def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always', 'no', 'auto'] = 'auto'):
+def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always', 'no', 'auto', 'autoWithDir'] = 'auto'):
+    """
+    Usage:
+    ```python
+        @recipe('dep1', 'dep2')
+        def my_recipe():
+            print('dep1 or dep2 has been done!')
+
+        @recipe('dep1', 'dep2', name='myfolder', rebuild='autoWithDir')
+        def recreate_myfolder():
+            print('myfolder will be removed and recreated if dep1 or dep2 changes')
+    ```
+    ---------------------------
+    For the 'rebuild' keyword:
+    - 'no': never rebuild if the target exists.
+    - 'always': always rebuild.
+    - 'auto': only rebuild when dependencies are changed (force removing out-of-date files but not folders)
+    - 'autoWithDir': rebuild when dependencies are changed (force removing out-of-date files and folders)
+
+    The difference between 'auto' and 'autoWithDir' is that
+    'auto' will not remove targets if the target is a directory.
+    """
     def decorator(func: Callable[[], None]):
         RECIPES[name or func.__name__.replace("_", "-")] = Recipe(
             list(dependencies), func, rebuild=rebuild
