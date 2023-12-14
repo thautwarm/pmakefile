@@ -2,16 +2,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Callable
 from pathlib import Path
-from subprocess import call
+import subprocess
 from textwrap import indent
-from contextlib import redirect_stdout, contextmanager
+from contextlib import contextmanager
 import os
 import sys
 import shlex
 import shutil
 import base64
 import hashlib
-import io
 import time
 
 __all__ = [
@@ -27,6 +26,9 @@ __all__ = [
     "Path",
     "shutil",
     "proft",
+    "auto_decode_bytes",
+    "text_to_b64",
+    "b64_to_text",
 ]
 
 _os_map: dict[str, Literal["windows", "linux", "macos"]] = {
@@ -40,15 +42,17 @@ _os_map: dict[str, Literal["windows", "linux", "macos"]] = {
 
 
 if os.environ.get("PMAKEFILE_PROF"):
+
     @contextmanager
-    def proft(title: str): # type: ignore
+    def proft(title: str):  # type: ignore
         t0 = time.time()
         try:
             yield
         finally:
-            print(f'[{title}]: {time.time() - t0}s')
+            print(f"[{title}]: {time.time() - t0}s")
 
 else:
+
     class proft:
         def __init__(self, title):
             pass
@@ -82,33 +86,122 @@ def get_dlext(os: Literal["windows", "linux", "macos"] | None = None):
     raise SystemError(f"Unknown OS: {os}")
 
 
+def _quote_arg(arg: str) -> str:
+    if hasattr(shlex, "quote"):
+        return shlex.quote(arg)
+    if not arg:
+        return "''"
+    if arg.isalnum():
+        return arg
+    if "'" in arg:
+        arg = arg.replace("'", r"'\''")
+    return f"'{arg}'"
+
+
+def _join_commands(cmds: str | list[str]):
+    if isinstance(cmds, str):
+        return cmds
+    if hasattr(shlex, "join"):
+        return shlex.join(cmds)
+    cmds = [_quote_arg(cmd) for cmd in cmds]
+    return " ".join(cmds)
+
+
+CommonEncodings = ["utf-8", "gbk", "gb2312", "gb18030", "big5"]
+
+
+class AutoDecodeError(UnicodeError):
+    pass
+
+
+def auto_decode_bytes(b: bytes) -> str:
+    for encoding in CommonEncodings:
+        try:
+            return b.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise AutoDecodeError("Fail to guess encoding")
+
+
 def shell(
     command: str | list[str],
     *,
     env: dict | None = None,
     noprint: bool = False,
+    assure_output: bool = False,
 ):
+    """
+    Run a shell command, raise exception if return code is not 0.
+    If the command succeeds, return the output of the command.
+
+    If `noprint` is True:
+        The command will not be printed.
+
+    If `assure_output` is True:
+        The command output will be automatically decoded, and fail if the output is not encoded by `CommonEncodings`.
+
+    If `env` is not None:
+        The command will be executed with the given environment variables.
+
+    If `command` is a string:
+        The command will be executed with `shell=True`.
+    """
     try:
         if isinstance(command, list) and command:
             cmd = command[0]
             command[0] = shutil.which(cmd) or cmd
-        stdout = io.StringIO()
         if not noprint:
             print("\033[36m", end="")
             if isinstance(command, str):
                 print(command)
             else:
-                print(shlex.join(command))
+                print(_join_commands(command))
             print("\033[0m", end="")
-        with redirect_stdout(stdout):
-            call(command, env=env)
-        return stdout.getvalue()
-    except Exception as e:
-        print(e)
+        if isinstance(command, str):
+            out = subprocess.run(
+                command,
+                env=env,
+                shell=True,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        else:
+            out = subprocess.run(
+                command,
+                env=env,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        out.check_returncode()
+        res = out.stdout
+        try:
+            return auto_decode_bytes(res)
+        except AutoDecodeError:
+            if assure_output:
+                raise
+            return None
+
+    except subprocess.CalledProcessError as e:
         # print red
         print("\033[31m", end="")
-        print(f"Error when executing: %s" % shlex.join(command))
-        # print(f'Error: {e}')
+        print(f"Error when executing: %s" % _join_commands(command))
+        stdout = e.stdout
+        if isinstance(stdout, bytes):
+            # common encodings
+            for encoding in ["utf-8", "gbk", "gb2312", "gb18030", "big5"]:
+                try:
+                    print(stdout.decode(encoding))
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                print(stdout)
+        else:
+            print(stdout)
+
         if os.environ.get("trace"):
             import traceback
 
@@ -136,6 +229,8 @@ _deps: list[str] | None = None
 
 
 _cache_text_to_b64: dict[str, str] = {}
+
+
 def text_to_b64(s: str, cache: bool = False):
     if cache:
         v = _cache_text_to_b64.get(s)
@@ -148,18 +243,22 @@ def text_to_b64(s: str, cache: bool = False):
 def b64_to_text(s: str):
     return base64.b64decode(s.encode("utf-8")).decode("utf-8")
 
+
 def get_deps():
     if _deps is None:
         raise RuntimeError("can only use 'get_deps()' inside recipes")
     return list(_deps)
 
+
 _encodes: dict[str, bytes] = {}
+
 
 def _get_encodes(k: str):
     v = _encodes.get(k)
     if v is None:
-        _encodes[k] = v = k.encode('utf-8')
+        _encodes[k] = v = k.encode("utf-8")
     return v
+
 
 class MakefileRunner:
     makefile: Makefile
@@ -193,19 +292,19 @@ class MakefileRunner:
     def _get_cache_hash(self, recipe_self: str) -> bytes:
         recipe_cache_dir = self.cache_dir.joinpath("recipes")
         recipe_cache_dir.mkdir(exist_ok=True, parents=True)
-        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache = True))
+        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache=True))
         if cache_file.exists():
             if cache_file.is_dir():
                 raise FileExistsError(
                     f"cache for {recipe_self} is a directory, try fixing it by removing '.pmake_caches'"
                 )
             return base64.b64decode(cache_file.read_text(encoding="utf-8"))
-        return b''
+        return b""
 
     def _save_cache_hash(self, recipe_self: str, h: bytes):
         recipe_cache_dir = self.cache_dir.joinpath("recipes")
         recipe_cache_dir.mkdir(exist_ok=True, parents=True)
-        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache = True))
+        cache_file = recipe_cache_dir.joinpath(text_to_b64(recipe_self, cache=True))
         cache_file.write_text(base64.b64encode(h).decode())
 
     def _compute_hash(self, prereqs: list[str], recipe_self: str, is_phony: bool):
@@ -214,20 +313,20 @@ class MakefileRunner:
             hgen = hashlib.md5(b"fs@")
             p = Path(recipe_self)
             if p.exists():
-                hgen.update(b'exist@')
+                hgen.update(b"exist@")
                 hgen.update(_get_encodes(recipe_self))
                 if p.is_file():
-                    hgen.update(b'~file=')
+                    hgen.update(b"~file=")
                     hgen.update(p.read_bytes())
             else:
-                hgen.update(b'unknown@')
+                hgen.update(b"unknown@")
                 hgen.update(_get_encodes(recipe_self))
         else:
             hgen = hashlib.md5(b"phony@")
             hgen.update(_get_encodes(recipe_self))
 
         for each in prereqs:
-            hgen.update(b'+')
+            hgen.update(b"+")
             hgen.update(_get_encodes(each))
             hgen.update(self._get_cache_hash(each))
 
@@ -240,7 +339,6 @@ class MakefileRunner:
             return
 
         with proft(f"[PMakefile] run {recipe_name}"):
-
             recipe = self.makefile.commands.get(recipe_name)
             if recipe:
                 for each in recipe.dependencies:
@@ -260,7 +358,9 @@ class MakefileRunner:
             if recipe:
 
                 def compute_hash():
-                    return self._compute_hash(recipe.dependencies, recipe_name, is_phony)
+                    return self._compute_hash(
+                        recipe.dependencies, recipe_name, is_phony
+                    )
 
                 new_hash = compute_hash()
                 _deps = recipe.dependencies
@@ -301,13 +401,13 @@ class MakefileRunner:
                 recipe = self.makefile.commands.get(recipe_name)
                 if p.exists() and recipe:
                     if p.is_dir():
-                        if recipe.rebuild in ('always', 'autoWithDir'):
+                        if recipe.rebuild in ("always", "autoWithDir"):
                             shutil.rmtree(p, ignore_errors=True)
                             try:
                                 p.rmdir()
                             except:
                                 pass
-                        elif recipe.rebuild == 'auto':
+                        elif recipe.rebuild == "auto":
                             # will run the recipe, but directories are reused.
                             pass
                         else:
@@ -333,7 +433,11 @@ def phony(names: list[str]):
     PHONY.update(names)
 
 
-def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always', 'no', 'auto', 'autoWithDir'] = 'auto'):
+def recipe(
+    *dependencies: str,
+    name: str | None = None,
+    rebuild: Literal["always", "no", "auto", "autoWithDir"] = "auto",
+):
     """
     Usage:
     ```python
@@ -355,6 +459,7 @@ def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always
     The difference between 'auto' and 'autoWithDir' is that
     'auto' will not remove targets if the target is a directory.
     """
+
     def decorator(func: Callable[[], None]):
         RECIPES[name or func.__name__.replace("_", "-")] = Recipe(
             list(dependencies), func, rebuild=rebuild
@@ -365,6 +470,7 @@ def recipe(*dependencies: str, name: str | None = None, rebuild: Literal['always
 
 
 _hasRun = False
+
 
 def make(*recipes):
     global _hasRun
