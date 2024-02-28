@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Literal, Callable
+from typing import Callable
 from pathlib import Path
 import subprocess
 from textwrap import indent
@@ -12,6 +12,11 @@ import shutil
 import base64
 import hashlib
 import time
+import typing
+
+# fix for python 3.7
+if typing.TYPE_CHECKING:
+    from typing import Literal
 
 __all__ = [
     "shlex",
@@ -418,7 +423,9 @@ class MakefileRunner:
                             # else is in possible
                             assert False, f"unknown rebuild mode: {recipe.rebuild}"
                     else:
-                        p.unlink(missing_ok=True)
+                        if p.exists():
+                            p.unlink()  # fix for python 3.7
+
             self._run_simple(recipe_name)
         finally:
             self.built_recipes.add(recipe_name)
@@ -571,8 +578,10 @@ def main():
             with proft("[PMakefile] run main procedure"):
                 import_from_source_file(cwd.joinpath(alt), "__make_main__")
                 if not _hasRun:
-                    make()
-
+                    try:
+                        make()
+                    except Exception as e:
+                        continue
             return
 
     # print warning
